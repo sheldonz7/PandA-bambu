@@ -45,20 +45,21 @@
 #ifndef FRONTEND_FLOW_STEP_HPP
 #define FRONTEND_FLOW_STEP_HPP
 
+#include "custom_set.hpp"
+#include "design_flow_step.hpp"
+#include "refcount.hpp"
+
+#include <cstddef>
+#include <functional>
+#include <string>
+#include <typeindex>
+#include <utility>
+
 #include "config_HAVE_FROM_PRAGMA_BUILT.hpp"
 #include "config_HAVE_HOST_PROFILING_BUILT.hpp"
 #include "config_HAVE_ILP_BUILT.hpp"
 #include "config_HAVE_PRAGMA_BUILT.hpp"
 #include "config_HAVE_TASTE.hpp"
-
-#include "custom_set.hpp"       // for unordered_set
-#include "design_flow_step.hpp" // for DesignFlowStep
-#include "refcount.hpp"         // for REF_FORWARD_DECL
-#include <cstddef>              // for size_t
-#include <functional>
-#include <string>    // for string
-#include <typeindex> // for hash
-#include <utility>   // for pair
 
 /// Forward declaration
 CONSTREF_FORWARD_DECL(application_manager);
@@ -196,12 +197,12 @@ namespace std
    {
       size_t operator()(FrontendFlowStepType algorithm) const
       {
-         hash<int> hasher;
-         return hasher(static_cast<int>(algorithm));
+         return static_cast<size_t>(algorithm);
       }
    };
 } // namespace std
 #endif
+
 class FrontendFlowStep : public DesignFlowStep
 {
  public:
@@ -228,7 +229,7 @@ class FrontendFlowStep : public DesignFlowStep
     * Return the set of analyses in relationship with this design step
     * @param relationship_type is the type of relationship to be considered
     */
-   virtual const CustomUnorderedSet<std::pair<FrontendFlowStepType, FunctionRelationship>>
+   virtual CustomUnorderedSet<std::pair<FrontendFlowStepType, FunctionRelationship>>
    ComputeFrontendRelationships(const DesignFlowStep::RelationshipType relationship_type) const = 0;
 
  public:
@@ -239,7 +240,8 @@ class FrontendFlowStep : public DesignFlowStep
     * @param frontend_flow_step_type is the type of the analysis
     * @param _Param is the set of the parameters
     */
-   FrontendFlowStep(const application_managerRef AppM, const FrontendFlowStepType frontend_flow_step_type,
+   FrontendFlowStep(DesignFlowStep::signature_t signature, const application_managerRef AppM,
+                    const FrontendFlowStepType frontend_flow_step_type,
                     const DesignFlowManagerConstRef design_flow_manager, const ParameterConstRef parameters);
 
    /**
@@ -303,7 +305,6 @@ class FrontendFlowStep : public DesignFlowStep
 };
 
 #if NO_ABSEIL_HASH
-
 /**
  * Definition of hash function for FrontendFlowStep::FunctionRelationship
  */
@@ -315,8 +316,7 @@ namespace std
    {
       size_t operator()(FrontendFlowStep::FunctionRelationship relationship) const
       {
-         hash<int> hasher;
-         return hasher(static_cast<int>(relationship));
+         return static_cast<size_t>(relationship);
       }
    };
 } // namespace std

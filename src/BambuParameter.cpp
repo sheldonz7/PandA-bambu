@@ -1713,11 +1713,11 @@ int BambuParameter::Exec()
          {
             if(std::string(optarg) == "V")
             {
-               setOption(OPT_writer_language, static_cast<int>(HDLWriter_Language::VERILOG));
+               setOption(OPT_writer_language, HDLWriter_Language::VERILOG);
             }
             else if(std::string(optarg) == "H")
             {
-               setOption(OPT_writer_language, static_cast<int>(HDLWriter_Language::VHDL));
+               setOption(OPT_writer_language, HDLWriter_Language::VHDL);
             }
             else
             {
@@ -1873,7 +1873,7 @@ int BambuParameter::Exec()
 #if HAVE_HOST_PROFILING_BUILT
          case OPT_HOST_PROFILING:
          {
-            setOption(OPT_profiling_method, static_cast<int>(HostProfiling_Method::PM_BBP));
+            setOption(OPT_profiling_method, HostProfiling_Method::PM_BBP);
             break;
          }
 #endif
@@ -2385,7 +2385,7 @@ int BambuParameter::Exec()
          const auto input_file =
              isOption(OPT_input_file) ? getOption<std::string>(OPT_input_file) + STR_CST_string_separator : "";
          setOption(OPT_input_file, input_file + filename);
-         setOption(OPT_input_format, static_cast<int>(Parameters_FileFormat::FF_AADL));
+         setOption(OPT_input_format, Parameters_FileFormat::FF_AADL);
       }
 #endif
       else if(file_type == Parameters_FileFormat::FF_C || file_type == Parameters_FileFormat::FF_OBJECTIVEC ||
@@ -2395,7 +2395,7 @@ int BambuParameter::Exec()
          const auto input_file =
              isOption(OPT_input_file) ? getOption<std::string>(OPT_input_file) + STR_CST_string_separator : "";
          setOption(OPT_input_file, input_file + filename);
-         setOption(OPT_input_format, static_cast<int>(file_type));
+         setOption(OPT_input_format, file_type);
       }
       else if(file_type == Parameters_FileFormat::FF_RAW ||
               (isOption(OPT_input_format) &&
@@ -2404,7 +2404,7 @@ int BambuParameter::Exec()
          const auto input_file =
              isOption(OPT_input_file) ? getOption<std::string>(OPT_input_file) + STR_CST_string_separator : "";
          setOption(OPT_input_file, input_file + filename);
-         setOption(OPT_input_format, static_cast<int>(Parameters_FileFormat::FF_RAW));
+         setOption(OPT_input_format, Parameters_FileFormat::FF_RAW);
          if(!isOption(OPT_pretty_print))
          {
             setOption(OPT_pretty_print, "_a.c");
@@ -2781,7 +2781,7 @@ void BambuParameter::CheckParameters()
    {
       setOption(OPT_generate_taste_architecture, true);
       setOption(OPT_clock_period, 20);
-      setOption(OPT_writer_language, static_cast<int>(HDLWriter_Language::VHDL));
+      setOption(OPT_writer_language, HDLWriter_Language::VHDL);
       setOption(OPT_interface_type, HLSFlowStep_Type::TASTE_INTERFACE_GENERATION);
       setOption(OPT_channels_type, MemoryAllocation_ChannelsType::MEM_ACC_NN);
       setOption(OPT_channels_number, 2);
@@ -3522,7 +3522,7 @@ void BambuParameter::CheckParameters()
       THROW_ERROR("--discrepancy-hw is only compatible with classic FSM controllers");
    }
    if(isOption(OPT_discrepancy_hw) && getOption<bool>(OPT_discrepancy_hw) &&
-      static_cast<HDLWriter_Language>(getOption<unsigned int>(OPT_writer_language)) != HDLWriter_Language::VERILOG)
+      getOption<HDLWriter_Language>(OPT_writer_language) != HDLWriter_Language::VERILOG)
    {
       THROW_ERROR("--discrepancy-hw is only compatible with Verilog");
    }
@@ -3703,7 +3703,7 @@ void BambuParameter::SetDefaults()
    setOption(OPT_top_file, "top");
 
    /// backend HDL
-   setOption(OPT_writer_language, static_cast<int>(HDLWriter_Language::VERILOG));
+   setOption(OPT_writer_language, HDLWriter_Language::VERILOG);
 
    /// -- Module Interfaces -- //
    setOption(OPT_interface, true);
@@ -3779,7 +3779,7 @@ void BambuParameter::SetDefaults()
 
 #if HAVE_HOST_PROFILING_BUILT
    setOption(OPT_exec_argv, STR_CST_string_separator);
-   setOption(OPT_profiling_method, static_cast<int>(HostProfiling_Method::PM_NONE));
+   setOption(OPT_profiling_method, HostProfiling_Method::PM_NONE);
    setOption(OPT_host_compiler, CompilerWrapper::getDefaultCompiler());
 #endif
    setOption(OPT_clock_period, 10.0);
