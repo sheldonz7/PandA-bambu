@@ -807,7 +807,10 @@ void structural_manager::add_connection(structural_objectRef src, structural_obj
 void structural_manager::WriteDot(const std::string& file_name, circuit_graph_type gt, graph* g) const
 {
    const auto output_directory = Param->getOption<std::string>(OPT_dot_directory);
-   std::ofstream f((output_directory + file_name).c_str());
+   PRINT_DBG_MEX(
+                   DEBUG_LEVEL_VERBOSE, debug_level,
+                   "structural manager trying to output dot to path: " + (output_directory + "/" + file_name));
+   std::ofstream f((output_directory + "/" + file_name).c_str());
 
    if(g == nullptr)
    {
