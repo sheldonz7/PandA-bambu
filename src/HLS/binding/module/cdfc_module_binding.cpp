@@ -84,6 +84,8 @@
 
 #include <algorithm>
 #include <boost/range/adaptor/reversed.hpp>
+#include <boost/graph/graphviz.hpp>
+#include <boost/graph/adjacency_list.hpp>
 #include <cmath>
 #include <deque>
 #include <filesystem>
@@ -93,6 +95,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <random>
 
 #ifdef HC_APPROACH
 #include "hierarchical_clustering.hpp"
@@ -107,6 +111,63 @@ struct spec_hierarchical_clustering : public hierarchical_clustering<>
 #define DSP_MARGIN 1.0
 #define CLOCK_MARGIN 0.97
 #define OP_THRESHOLD 1000
+
+int getRandomNumber(int min, int max) {
+    // Random device will provide a seed
+    std::random_device rd;  
+    // Mersenne Twister: Good quality random number generator
+    std::mt19937 gen(rd()); 
+    // Uniform distribution in range [min, max]
+    std::uniform_int_distribution<> distrib(min, max);
+    return distrib(gen);
+}
+
+
+// Function to write the graph to a DOT file
+void write_graph_to_dot(const boost_cdfc_graph& graph, const std::string& filename) {
+    std::ofstream dot_file(filename.c_str());
+
+    // Custom properties writer (optional)
+    auto vertex_writer = [](std::ostream& out, const auto& v) {
+        // Customize vertex properties here
+        out << "[label=\"" << v << "\"]";
+    };
+    auto edge_writer = [&](std::ostream& out, const auto& e) {
+        // Access edge properties like weight
+        auto weight = get(boost::edge_bundle, graph)[e].weight;
+        out << "[label=\"" << weight << "\"]";
+    };
+    auto graph_writer = [](std::ostream& out) {
+        // Customize graph properties here
+        // For example: out << "size=\"3,3\";\n";
+        // Or set the graph name: out << "graph [name=\"My Graph\"];\n";
+    };
+
+    // Write the graph to the DOT file
+    boost::write_graphviz(dot_file, graph, vertex_writer, edge_writer, graph_writer);
+}
+
+class cdfc_node_info_writer {
+   private:
+      const OpGraphConstRef sdg;
+      std::vector<vertex> c2s;
+
+   public:
+      explicit cdfc_node_info_writer(const OpGraphConstRef _sdg, const std::vector<vertex>& _c2s)
+            : sdg(_sdg), c2s(_c2s)
+      {
+      }
+
+      void operator()(std::ostream& out, const cdfc_vertex& v) const
+      {
+         const auto op_info = sdg->CGetOpNodeInfo(c2s[v]);
+         out << "[label=\"" << op_info->vertex_name + "(" + op_info->GetOperation() + ")" << "\"]";
+      
+      
+      }
+};
+
+
 
 template <typename OutputIterator>
 struct topological_based_sorting_visitor : public boost::dfs_visitor<>
@@ -946,6 +1007,14 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
    // pointer to a Control, Data dependence and anti-dependence graph graph
    const FunctionBehaviorConstRef FB = HLSMgr->CGetFunctionBehavior(funId);
    const OpGraphConstRef sdg = FB->CGetOpGraph(FunctionBehavior::SDG);
+
+   // print SDG dot for debugging purpose
+   std::string file_name = "OP_SDG.dot";
+   if(parameters->getOption<bool>(OPT_print_dot))
+   {
+      sdg->WriteDot(file_name, 1);
+   }
+
 #ifdef HC_APPROACH
    const OpGraphConstRef fsdg = FB->CGetOpGraph(FunctionBehavior::FSDG);
 #endif
@@ -1311,6 +1380,10 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
       double clock_cycle = HLS->HLS_C->get_clock_period() * CLOCK_MARGIN * clock_period_resource_fraction;
 
+
+      std::ofstream dot_file_cdfc("cdfc_bulk_graph_pre_compatibility.dot");
+      boost::write_graphviz(dot_file_cdfc, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s));
+
 #ifdef HC_APPROACH
       spec_hierarchical_clustering hc;
 
@@ -1589,6 +1662,10 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                         "---Weight computation completed in " + print_cpu_time(weight_cputime) + " seconds");
       }
 
+
+      
+
+
       const cdfc_graphRef CG = cdfc_graphRef(new cdfc_graph(
           *cdfc_bulk_graph, cdfc_graph_edge_selector<boost_cdfc_graph>(COMPATIBILITY_EDGE, &*cdfc_bulk_graph),
           cdfc_graph_vertex_selector<boost_cdfc_graph>()));
@@ -1768,12 +1845,28 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                         "---False-loop computation completed in " + print_cpu_time(falseloop_cputime) + " seconds");
       }
 
-      if(parameters->getOption<bool>(OPT_print_dot))
-      {
-         // cdfc->WriteDot("HLS_CD_COMP.dot");
-      }
 
       CustomUnorderedMap<vertex, vertex> identity_converter;
+
+
+      
+
+      
+      if(parameters->getOption<bool>(OPT_print_dot))
+      {
+         std::ofstream dot_file1("cdfc_bulk_graph.dot");
+         std::ofstream dot_file2("cdfc.dot");
+         std::ofstream dot_file3("CG.dot");
+         std::ofstream dot_file4("CD_chained_graph.dot");
+
+         //cdfc->WriteDot("HLS_CD_COMP.dot");
+         boost::write_graphviz(dot_file1, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s));
+         boost::write_graphviz(dot_file2, *cdfc);
+         boost::write_graphviz(dot_file3, *CG, cdfc_node_info_writer(sdg, c2s));
+         boost::write_graphviz(dot_file4, *CD_chained_graph, cdfc_node_info_writer(sdg, c2s));
+      }
+
+      
 
       /// partition vertices for clique covering or bind the easy functional units
       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
@@ -1817,7 +1910,8 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
       /// solve the binding problem for all the partitions
       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "---solve the binding problem for all the partitions");
-      const unsigned int number_of_iterations = n_vert > OP_THRESHOLD ? 2 : 10;
+      // const unsigned int number_of_iterations = n_vert > OP_THRESHOLD ? 2 : 10;
+      const unsigned int number_of_iterations = 1;
       const std::map<unsigned int, unsigned int> numModule_initial = numModule;
       const size_t total_modules_allocated_initial = total_modules_allocated;
       const double total_resource_area_initial = total_resource_area;
@@ -1895,6 +1989,11 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
          {
             START_TIME(clique_iteration_cputime);
          }
+
+
+         // module clique for all partitions
+         
+
          for(const auto& partition : partitions)
          {
             THROW_ASSERT(partition.second.size() > 1, "bad projection");
@@ -1938,6 +2037,15 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             /// build the clique covering solver
             auto module_clique = clique_covering<vertex>::create_solver(clique_covering_method,
                                                                         static_cast<unsigned>(partition.second.size()));
+            
+            if(clique_covering_method == CliqueCovering_Algorithm::BIPARTITE_MATCHING) {
+               PRINT_DBG_MEX(DEBUG_LEVEL_VERBOSE, debug_level, "Solve clique covering with bipartite matching");
+            } else if (clique_covering_method == CliqueCovering_Algorithm::TS_WEIGHTED_CLIQUE_COVERING) {
+               PRINT_DBG_MEX(DEBUG_LEVEL_VERBOSE, debug_level, "Solve clique covering with weighted TS");
+            } else {
+               PRINT_DBG_MEX(DEBUG_LEVEL_VERBOSE, debug_level, "Solve clique covering with unexpected method");
+            }
+
             /// add vertex to the clique covering solver
             for(const auto v : partition.second)
             {
@@ -1994,11 +2102,16 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 #endif
                   continue; /// only one edge is needed to build the undirected compatibility graph
                }
+               
                _w = weight_computation(cond1, cond2, src, tgt, local_mux_time, dfg, fu, slack_time, starting_time,
 #ifdef HC_APPROACH
                                        hc,
 #endif
                                        con_rel, controller_delay, fu_prec);
+               
+
+               //_w = getRandomNumber(1, _w);
+               //_w = 1;
                if(_w > 0)
                {
                   module_clique->add_edge(src, tgt, _w);
@@ -2014,7 +2127,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                    parameters->getOption<std::filesystem::path>(OPT_dot_directory) / functionName;
                std::filesystem::create_directories(output_directory);
                const auto file_name =
-                   output_directory / ("MB_" + allocation_information->get_string_name(partition.first) + ".dot");
+                   output_directory / ("MB_" + allocation_information->get_string_name(partition.first) + "_iter_" + STR(iteration) + ".dot");
                module_clique->writeDot(file_name);
             }
 
@@ -2344,7 +2457,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             }
 
             INDENT_OUT_MEX(OUTPUT_LEVEL_PEDANTIC, output_level,
-                           "---cdfc mux estimation " + STR(Tot_mux) + " -- Number of cliques covering the graph: " +
+                           "---Iteration " + STR(iteration) + "cdfc mux estimation " + STR(Tot_mux) + " -- Number of cliques covering the graph: " +
                                STR(module_clique->num_vertices() + delta_nclique) + " " + functionName + "_" +
                                allocation_information->get_string_name(partition.first) + " with " +
                                STR(partition.second.size()) + " vertices");
