@@ -52,7 +52,11 @@
 #include <utility>
 #include <vector>
 
+// hierarchical clustering
 //#define HC_APPROACH
+
+// RL-based coloring
+#define RL_COLORING
 
 CONSTREF_FORWARD_DECL(AllocationInformation);
 enum class CliqueCovering_Algorithm;
@@ -181,7 +185,6 @@ struct edge_cdfc_selector
    {
    }
 };
-
 /// bulk compatibility graph
 using boost_cdfc_graph = boost::adjacency_list<boost::vecS, boost::vecS, boost::bidirectionalS,
                                                boost::property<boost::vertex_index_t, std::size_t>, edge_cdfc_selector>;
@@ -206,6 +209,8 @@ using cdfc_out_edge_iterator = boost::graph_traits<cdfc_graph>::out_edge_iterato
 using cdfc_edge_iterator = boost::graph_traits<cdfc_graph>::edge_iterator;
 /// edge definition.
 using cdfc_edge = boost::graph_traits<cdfc_graph>::edge_descriptor;
+
+using cdfc_vertex_iterator = boost::graph_traits<cdfc_graph>::vertex_iterator;
 
 struct CdfcEdgeInfo : public EdgeInfo
 {
@@ -423,5 +428,29 @@ class cdfc_module_binding : public fu_binding_creator
     */
    DesignFlowStep_Status InternalExec() override;
 };
+
+
+class cdfg_helper {
+   public:
+   static std::vector<cdfc_edge> find_edges_by_selector(cdfc_vertex u, cdfc_vertex v, const boost_cdfc_graphRef& cdfg, int selector_value) {
+      std::vector<cdfc_edge> edges;
+      //std::pair<cdfc_out_edge_iterator, cdfc_out_edge_iterator> outEdges = boost::out_edges(u, *cdfg);
+      //for (cdfc_out_edge_iterator ei = outEdges.first; ei != outEdges.second; ++ei) {
+      cdfc_out_edge_iterator oe_cg, oe_end_cg;
+      for(boost::tie(oe_cg, oe_end_cg) = boost::out_edges(u, *cdfg); oe_cg != oe_end_cg; ++oe_cg) 
+      {
+         if (boost::target(*oe_cg, *cdfg) == v && (*cdfg)[*oe_cg].selector == selector_value) {
+               edges.push_back(*oe_cg);
+         }
+      }
+      return edges;
+
+   }
+
+   static const int CF_EDGE = 3;
+   static const int DF_EDGE = 4;
+   static const int CP_EDGE = 2;
+};
+
 
 #endif

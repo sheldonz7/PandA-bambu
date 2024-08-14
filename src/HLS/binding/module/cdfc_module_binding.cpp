@@ -147,27 +147,150 @@ void write_graph_to_dot(const boost_cdfc_graph& graph, const std::string& filena
     boost::write_graphviz(dot_file, graph, vertex_writer, edge_writer, graph_writer);
 }
 
-class cdfc_node_info_writer {
+
+#ifdef RL_COLORING
+class cdfc_node_info_writer{
    private:
+   // some helper data structures storing node related info
       const OpGraphConstRef sdg;
+
+      // cdfc_graph node to sdg graph node mapping
       std::vector<vertex> c2s;
 
+      //
+      const tree_managerRef TreeM;
+
+      const AllocationInformationConstRef alloc_info;
+
+      const fu_bindingRef fu;
+
    public:
-      explicit cdfc_node_info_writer(const OpGraphConstRef _sdg, const std::vector<vertex>& _c2s)
-            : sdg(_sdg), c2s(_c2s)
+      explicit cdfc_node_info_writer(const OpGraphConstRef _sdg, const std::vector<vertex> _c2s, const tree_managerRef _TreeM,
+      const AllocationInformationConstRef _alloc_info, const fu_bindingRef _fu)
+            : sdg(_sdg), c2s(_c2s), TreeM(_TreeM), alloc_info(_alloc_info), fu(_fu)
       {
       }
 
+      // node features
       void operator()(std::ostream& out, const cdfc_vertex& v) const
-      {
+      {         
          const auto op_info = sdg->CGetOpNodeInfo(c2s[v]);
-         out << "[label=\"" << op_info->vertex_name + "(" + op_info->GetOperation() + ")" << "\"]";
+         PRINT_DBG_MEX(4, 4, "Considering operation special " + op_info->GetOperation() + " " +
+                         STR((op_info->GetNodeId())));
+        
+         
+         out << "[label=\"" << op_info->vertex_name + "(" + op_info->GetOperation() + ")\",";
+         //out << "type=" + std::to_string(op_info->node_type) << ",";
+         out << "node_id=" + STR(op_info->GetNodeId()) << ",";
+         
+         // bitwidth
       
-      
+         if(GET_TYPE(sdg, c2s[v]) & (TYPE_ENTRY | TYPE_EXIT)) {
+            out << "bitwidth=0" << ",";
+         } else {
+            const auto tree_node = TreeM->GetTreeNode(op_info->GetNodeId());
+            if (tree_node) {
+               //PRINT_DBG_MEX(4, 4, "kind=" + std::to_string(tree_node->get_kind()));
+               //out << "kind=" + std::to_string(op_info->node_type) << ",";
+               const auto type_node = tree_helper::CGetType(tree_node);
+               if(type_node){
+                  auto bitwidth_op = tree_helper::TypeSize(tree_node);
+                  out << "bitwidth=" + std::to_string(bitwidth_op) << ",";
+                  out << "typee=" + STR(type_node->get_kind()) << ",";
+               } else {
+                  out << "bitwidth=0" << ",";
+               }
+            } else {
+               out << "bitwidth=0" << ",";
+            }
+            // INDENT_DBG_MEX(4, 4, "kind=" + std::to_string(tree_node->get_kind()));
+         }
+
+         // out << "kind=" + std::to_string(type_node->get_kind()) << ",";
+         
+         // function unit
+         unsigned int fu_unit = fu->get_assign(c2s[v]);
+
+
+         // type supported
+
+
+         // out << "type_supported=" 
+
+
+         // cycle latency
+         //out << "latency=" + alloc_info->get_    ;
+
+         // time latency
+         //out << ""
+
+         // chaining?
+
+
+
+         // resource
+         // for function unit
+         out << "function_unit=" + STR(fu_unit) << ",";
+
+         // double resource_area += allocation_information->get_area(fu_unit);
+         // double DSPs += allocation_information->get_DSPs(fu_unit);
+         // out << "resource_area=" + STR(alloc_info->get_area(fu_unit)) << ",";
+         // out << "DSP_usage=" + STR(alloc_info->get_DSPs(fu_unit)) << ",";
+
+
+
+         // number of input/output, i.e., fan_in, fan_out
+
+
+         // for interconnection and mux
+         
+         
+
+         out << "]";
+      }
+
+
+};
+
+
+class cdfc_edge_info_writer{
+   private:
+      const boost_cdfc_graphRef graph;
+   
+
+   public:
+      explicit cdfc_edge_info_writer(const boost_cdfc_graphRef _graph)
+            : graph(_graph)
+      {
+      }
+      void operator()(std::ostream& out, const cdfc_edge& e) const
+      {
+         out << "[label=\"" << (*graph)[e].selector << "\",";
+         
+         
+         switch((*graph)[e].selector) {
+            case cdfg_helper::CF_EDGE:
+               out << "color=red";
+               break;
+            case cdfg_helper::DF_EDGE:
+               out << "color=blue";
+               break;
+            case cdfg_helper::CP_EDGE:
+               out << "color=green";
+               break;
+            default:
+               out << "color=black";
+               break;
+         }
+
+
+
+         out << "\"]";
       }
 };
 
 
+#endif
 
 template <typename OutputIterator>
 struct topological_based_sorting_visitor : public boost::dfs_visitor<>
@@ -997,7 +1120,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
    const tree_managerRef TreeM = HLSMgr->get_tree_manager();
    HLS->Rliv->set_HLS(HLS);
 
-   // resource binding and allocation  info
+   // resource binding and allocation info
    fu_bindingRef fu = HLS->Rfu;
    const AllocationInformationConstRef allocation_information = HLS->allocation_information;
 
@@ -1008,11 +1131,14 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
    const FunctionBehaviorConstRef FB = HLSMgr->CGetFunctionBehavior(funId);
    const OpGraphConstRef sdg = FB->CGetOpGraph(FunctionBehavior::SDG);
 
+
+   std::string functionName = FB->CGetBehavioralHelper()->get_function_name();
+
    // print SDG dot for debugging purpose
    std::string file_name = "OP_SDG.dot";
    if(parameters->getOption<bool>(OPT_print_dot))
    {
-      sdg->WriteDot(file_name, 1);
+      sdg->WriteDot(file_name, 3);
    }
 
 #ifdef HC_APPROACH
@@ -1132,6 +1258,9 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
       connection_relation con_rel;
       initialize_connection_relation(con_rel, all_candidate_vertices);
       boost_cdfc_graphRef cdfc_bulk_graph = boost_cdfc_graphRef(new boost_cdfc_graph());
+      boost_cdfc_graphRef cdfg_bulk_graph = boost_cdfc_graphRef(new boost_cdfc_graph());
+
+
       if(output_level >= OUTPUT_LEVEL_MINIMUM)
       {
          START_TIME(slack_cputime);
@@ -1339,13 +1468,38 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
          s2c[s] = C;
       }
 
+     
+
+      //add all operation vertices (from cdfc graph) to the cdfg graph
+      cdfc_vertex_iterator cvi, cvi_end;
+      INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "---add the vertices to the second cdfc graph");
+      for(boost::tie(cvi, cvi_end) = boost::vertices(*cdfc_bulk_graph); cvi != cvi_end; ++cvi)
+      {
+         boost::add_vertex(*cdfg_bulk_graph);
+      }
+
+      if(parameters->getOption<bool>(OPT_print_dot))
+      {
+         std::ofstream dot_file1(functionName + "_cdfc_bulk_graph_vertex_only.dot");
+         std::ofstream dot_file2(functionName + "_cdfg_bulk_graph_vertex_only.dot");
+
+         //cdfc->WriteDot("HLS_CD_COMP.dot");
+         boost::write_graphviz(dot_file1, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu));
+         boost::write_graphviz(dot_file2, *cdfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu));
+      }
+
+
+      const OpGraphConstRef dfg = FB->CGetOpGraph(FunctionBehavior::DFG);
+      const OpGraphConstRef cfg = FB->CGetOpGraph(FunctionBehavior::CFG);
+
+
+
       /// add the control dependencies edges and the chained edges to the cdfc graph
       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
                      "---add the control dependencies edges and the chained edges to the cdfc graph");
-      const OpGraphConstRef dfg = FB->CGetOpGraph(FunctionBehavior::DFG);
       EdgeIterator ei, ei_end;
       for(boost::tie(ei, ei_end) = boost::edges(*sdg); ei != ei_end; ++ei)
-      {
+      { 
          vertex src = boost::source(*ei, *sdg);
          auto fu_unit_src = fu->get_assign(src);
          const auto II_src = allocation_information->get_initiation_time(fu_unit_src, src);
@@ -1378,13 +1532,132 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
          }
       }
 
+      // add the data flow edges from the dfg to the cdfg
+      INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
+                     "---add the control dependencies edges and the chained edges to the cdfg graph");
+      for(boost::tie(ei, ei_end) = boost::edges(*dfg); ei != ei_end; ++ei)
+      {
+         vertex src = boost::source(*ei, *dfg);
+         auto fu_unit_src = fu->get_assign(src);
+         const auto II_src = allocation_information->get_initiation_time(fu_unit_src, src);
+         vertex tgt = boost::target(*ei, *dfg);
+
+         cdfc_vertex cdfc_src = s2c[src];
+         cdfc_vertex cdfc_tgt = s2c[tgt];
+         if(cdfc_src != cdfc_tgt)
+         {
+            bool exists;
+            cdfc_edge E;
+
+            std::vector<cdfc_edge> df_edges;
+            // check DFG edges
+            // std::pair<cdfc_out_edge_iterator, cdfc_out_edge_iterator> edgePair = boost::edge_range(cdfc_src, cdfc_tgt, *cdfc_bulk_graph);
+            // for(cdfc_out_edge_iterator ei = edgePair.first; ei != edgePair.second; ++ei)
+            // {
+            //    INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "checking df edges");
+            //    if ((*cdfg_bulk_graph)[*ei].selector == cdfg_helper::DF_EDGE) {
+            //          df_edges.push_back(*ei);
+            //    }
+            // }
+
+            // cdfc_out_edge_iterator oe_cg, oe_end_cg;
+            // for(boost::tie(oe_cg, oe_end_cg) = boost::out_edges(cdfc_src, *cdfg_bulk_graph); oe_cg != oe_end_cg; ++oe_cg) 
+            // {
+            //    INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "checking df edges");
+            //    if (boost::target(*oe_cg, *cdfg_bulk_graph) == cdfc_tgt && (*cdfg_bulk_graph)[*oe_cg].selector == cdfg_helper::DF_EDGE) {
+            //          df_edges.push_back(*oe_cg);
+            //    }
+            // }
+
+            // std::cerr << "Chained " << cdfc_src << "-" << cdfc_tgt << " -- " << GET_NAME(sdg, src)  << "-" <<
+            // GET_NAME(sdg, tgt) << std::endl;
+            if(df_edges.size() == 0)
+            {
+               boost::tie(E, exists) = boost::add_edge(cdfc_src, cdfc_tgt, edge_cdfc_selector(cdfg_helper::DF_EDGE), *cdfg_bulk_graph);
+               THROW_ASSERT(exists, "already inserted edge");
+            }
+    
+         }
+         else
+         {
+            THROW_ERROR(std::string(GET_NAME(dfg, src)) + "(" + dfg->CGetOpNodeInfo(src)->GetOperation() + ")--" +
+                        GET_NAME(dfg, tgt) + "(" + dfg->CGetOpNodeInfo(tgt)->GetOperation() + ")");
+         }
+      
+      }
+
+      // add the control flow edges from the cfg to the cdfg
+      INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
+                     "---add the control dependencies edges and the chained edges to the second cdfc graph");
+      for(boost::tie(ei, ei_end) = boost::edges(*cfg); ei != ei_end; ++ei)
+      {
+         vertex src = boost::source(*ei, *cfg);
+         auto fu_unit_src = fu->get_assign(src);
+         const auto II_src = allocation_information->get_initiation_time(fu_unit_src, src);
+         vertex tgt = boost::target(*ei, *cfg);
+
+         cdfc_vertex cdfc_src = s2c[src];
+         cdfc_vertex cdfc_tgt = s2c[tgt];
+         if(cdfc_src != cdfc_tgt)
+         {
+            bool exists;
+            cdfc_edge E;
+
+            // check CFG edges
+            std::vector<cdfc_edge> cf_edges;
+            // check DFG edges
+            // std::pair<cdfc_out_edge_iterator, cdfc_out_edge_iterator> edgePair = boost::edge_range(cdfc_src, cdfc_tgt, *cdfc_bulk_graph);
+            // for(cdfc_out_edge_iterator ei = edgePair.first; ei != edgePair.second; ++ei)
+            // {
+            //    INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "checking cf edges");
+            //    if ((*cdfg_bulk_graph)[*ei].selector == cdfg_helper::CF_EDGE) {
+            //          cf_edges.push_back(*ei);
+            //    }
+            // }
+
+            // cdfc_out_edge_iterator oe_cg, oe_end_cg;
+            // for(boost::tie(oe_cg, oe_end_cg) = boost::out_edges(cdfc_src, *cdfg_bulk_graph); oe_cg != oe_end_cg; ++oe_cg) 
+            // {
+            //    INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "checking cf edges");
+            //    if (boost::target(*oe_cg, *cdfg_bulk_graph) == cdfc_tgt && (*cdfg_bulk_graph)[*oe_cg].selector == cdfg_helper::CF_EDGE) {
+            //          cf_edges.push_back(*oe_cg);
+            //    }
+            // }
+
+
+            // std::vector<cdfc_edge> cf_edges = cdfg_helper::find_edges_by_selector(cdfc_src, cdfc_tgt, cdfg_bulk_graph, cdfg_helper::CF_EDGE);
+            
+            // std::cerr << "Chained " << cdfc_src << "-" << cdfc_tgt << " -- " << GET_NAME(sdg, src)  << "-" <<
+            // GET_NAME(sdg, tgt) << std::endl;
+            if(cf_edges.size() == 0)
+            {
+               
+               boost::tie(E, exists) = boost::add_edge(cdfc_src, cdfc_tgt, edge_cdfc_selector(cdfg_helper::CF_EDGE), *cdfg_bulk_graph);
+               THROW_ASSERT(exists, "already inserted edge");
+            }
+    
+         }
+         else
+         {
+            THROW_ERROR(std::string(GET_NAME(cfg, src)) + "(" + cfg->CGetOpNodeInfo(src)->GetOperation() + ")--" +
+                        GET_NAME(cfg, tgt) + "(" + cfg->CGetOpNodeInfo(tgt)->GetOperation() + ")");
+         }
+      
+      }
+
+
       double clock_cycle = HLS->HLS_C->get_clock_period() * CLOCK_MARGIN * clock_period_resource_fraction;
 
 
-      std::ofstream dot_file_cdfc("cdfc_bulk_graph_pre_compatibility.dot");
-      boost::write_graphviz(dot_file_cdfc, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s));
+      std::ofstream dot_file_cdfc(functionName + "_cdfc_bulk_graph_pre_compatibility.dot");
+      std::ofstream dot_file_cdfg(functionName + "_cdfg_bulk_graph_pre_compatibility.dot");
+      boost::write_graphviz(dot_file_cdfc, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
+      boost::write_graphviz(dot_file_cdfc, *cdfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfg_bulk_graph));
 
 #ifdef HC_APPROACH
+      INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
+                     "---using hierarchical clustering for the module binding...");
+
       spec_hierarchical_clustering hc;
 
       /// add the vertices to the clustering graph graph
@@ -1640,6 +1913,35 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                      THROW_ERROR("already inserted edge " + GET_NAME(sdg, *cv2_it) + " - " + GET_NAME(sdg, *cv1_it) +
                                  " -- " + STR(s2c[*cv2_it]) + "->" + STR(s2c[*cv1_it]));
                   }
+
+
+                  PRINT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "-->Adding compatibility edge to  " + GET_NAME(sdg, *cv1_it));
+                  // add compatibility edge to cdfg_bulk
+                  std::vector<cdfc_edge> cp_edges;
+                  //cp_edges =  cdfg_helper::find_edges_by_selector(s2c[*cv1_it], s2c[*cv2_it], cdfg_bulk_graph, COMPATIBILITY_EDGE);
+                  if(cp_edges.size() == 0)
+                  {
+                     boost::tie(E, exists) = boost::add_edge(s2c[*cv1_it], s2c[*cv2_it], edge_cdfc_selector(COMPATIBILITY_EDGE, _w), *cdfg_bulk_graph);
+                     THROW_ASSERT(exists, "already inserted edge");
+                  }
+                  else
+                  {
+                     THROW_ERROR("CDFG: already inserted edge " + GET_NAME(sdg, *cv1_it) + " - " + GET_NAME(sdg, *cv2_it) +
+                                 " -- " + STR(s2c[*cv1_it]) + "->" + STR(s2c[*cv2_it]));
+                  }
+
+                  if(cp_edges.size() == 0)
+                  {
+                     boost::tie(E, exists) = boost::add_edge(s2c[*cv2_it], s2c[*cv1_it], edge_cdfc_selector(COMPATIBILITY_EDGE, _w), *cdfg_bulk_graph);
+                     THROW_ASSERT(exists, "already inserted edge");
+                  }
+                  else
+                  {
+                     THROW_ERROR("CDFG: already inserted edge " + GET_NAME(sdg, *cv1_it) + " - " + GET_NAME(sdg, *cv2_it) +
+                                 " -- " + STR(s2c[*cv1_it]) + "->" + STR(s2c[*cv2_it]));
+                  }
+
+           
                }
                else
                {
@@ -1672,7 +1974,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
       const cdfc_graphConstRef CD_chained_graph = cdfc_graphConstRef(
           new cdfc_graph(*cdfc_bulk_graph, cdfc_graph_edge_selector<boost_cdfc_graph>(CD_EDGE, &*cdfc_bulk_graph),
                          cdfc_graph_vertex_selector<boost_cdfc_graph>()));
-      std::string functionName = FB->CGetBehavioralHelper()->get_function_name();
+      
       if(parameters->getOption<bool>(OPT_print_dot))
       {
          // CD_chained_graph->WriteDot("HLS_CD_CHAINED.dot");
@@ -1845,39 +2147,36 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                         "---False-loop computation completed in " + print_cpu_time(falseloop_cputime) + " seconds");
       }
 
-
-      CustomUnorderedMap<vertex, vertex> identity_converter;
-
-
-      
-
-      
       if(parameters->getOption<bool>(OPT_print_dot))
       {
-         std::ofstream dot_file1("cdfc_bulk_graph.dot");
-         std::ofstream dot_file2("cdfc.dot");
-         std::ofstream dot_file3("CG.dot");
-         std::ofstream dot_file4("CD_chained_graph.dot");
+         std::ofstream dot_file1(functionName + "_cdfc_bulk_graph.dot");
+         std::ofstream dot_file5(functionName + "_cdfg_bulk_graph.dot");
+         std::ofstream dot_file2(functionName + "_cdfc.dot");
+         std::ofstream dot_file3(functionName + "_CG.dot");
+         std::ofstream dot_file4(functionName + "_CD_chained_graph.dot");
 
          //cdfc->WriteDot("HLS_CD_COMP.dot");
-         boost::write_graphviz(dot_file1, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s));
-         boost::write_graphviz(dot_file2, *cdfc);
-         boost::write_graphviz(dot_file3, *CG, cdfc_node_info_writer(sdg, c2s));
-         boost::write_graphviz(dot_file4, *CD_chained_graph, cdfc_node_info_writer(sdg, c2s));
+         boost::write_graphviz(dot_file1, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
+         boost::write_graphviz(dot_file2, *cdfc, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
+         boost::write_graphviz(dot_file3, *CG, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
+         boost::write_graphviz(dot_file4, *CD_chained_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
+         boost::write_graphviz(dot_file5, *cdfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfg_bulk_graph));
       }
 
-      
+      CustomUnorderedMap<vertex, vertex> identity_converter;
 
       /// partition vertices for clique covering or bind the easy functional units
       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
                      "---partition vertices for clique covering or bind the easy functional units");
       std::map<unsigned int, unsigned int> numModule;
       std::map<unsigned int, CustomOrderedSet<cdfc_vertex>, cdfc_resource_ordering_functor> partitions(r_functor);
+      CustomOrderedSet<cdfc_vertex> partition_collection_vertices;
       for(const auto& fu_cv : candidate_vertices)
       {
          fu_unit = fu_cv.first;
          for(const auto cv : fu_cv.second)
          {
+            PRINT_DBG_MEX(4, 4, "considering candidate vertices: " + STR(s2c[cv]) + "for functional unit" + STR(fu_unit));
             /// check easy binding
             if(boost::out_degree(s2c[cv], *CG) == 0)
             {
@@ -1897,7 +2196,9 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             }
             else
             {
+               PRINT_DBG_MEX(4,4, "adding vertex " + STR(s2c[cv]) + " to partition " + STR(fu_unit));
                partitions[fu_unit].insert(s2c[cv]);
+               partition_collection_vertices.insert(s2c[cv]);
                identity_converter[cv] = cv;
             }
          }
@@ -1908,10 +2209,57 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
          START_TIME(clique_cputime);
       }
 
+
+
+      
+      const cdfc_graphConstRef CG_cdfc_partitions_only(new cdfc_graph(
+            *cdfc_bulk_graph, cdfc_graph_edge_selector<boost_cdfc_graph>(COMPATIBILITY_EDGE, &*cdfc_bulk_graph),
+            cdfc_graph_vertex_selector<boost_cdfc_graph>(&partition_collection_vertices)));
+
+      const cdfc_graphConstRef CG_cdfg_partitions_only(new cdfc_graph(
+            *cdfg_bulk_graph, cdfc_graph_edge_selector<boost_cdfc_graph>(COMPATIBILITY_EDGE, &*cdfg_bulk_graph),
+            cdfc_graph_vertex_selector<boost_cdfc_graph>(&partition_collection_vertices)));
+
+
+      if(parameters->getOption<bool>(OPT_print_dot))
+      {   
+         std::ofstream dot_file6("CG_cdfc_partitions_only.dot");
+         std::ofstream dot_file7("CG_cdfg_partitions_only.dot");
+
+         //cdfc->WriteDot("HLS_CD_COMP.dot");
+         boost::write_graphviz(dot_file6, *CG_cdfc_partitions_only, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
+         boost::write_graphviz(dot_file7, *CG_cdfg_partitions_only, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfg_bulk_graph));
+      }
+
+#ifdef RL_COLORING
+      /// Wait for RL coloring
+
+
+      /// read the colored CG into cliques for each partitions
+
+
+      // for(const auto& partition : partitions)
+      // {
+
+
+
+      // }
+
+
+
+
+#else
+
+#endif
+
       /// solve the binding problem for all the partitions
       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "---solve the binding problem for all the partitions");
-      // const unsigned int number_of_iterations = n_vert > OP_THRESHOLD ? 2 : 10;
+      
+#ifdef RL_COLORING
       const unsigned int number_of_iterations = 1;
+#else
+      const unsigned int number_of_iterations = n_vert > OP_THRESHOLD ? 2 : 10;
+#endif
       const std::map<unsigned int, unsigned int> numModule_initial = numModule;
       const size_t total_modules_allocated_initial = total_modules_allocated;
       const double total_resource_area_initial = total_resource_area;
@@ -1990,9 +2338,6 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             START_TIME(clique_iteration_cputime);
          }
 
-
-         // module clique for all partitions
-         
 
          for(const auto& partition : partitions)
          {
@@ -2165,6 +2510,9 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                            "Starting clique covering on a graph with " + STR(partition.second.size()) +
                                " vertices for " + allocation_information->get_string_name(partition.first));
 
+            PRINT_DBG_MEX(DEBUG_LEVEL_VERBOSE, debug_level,  "Resource usage:" + STR(allocation_information->get_area(partition.first)));
+
+            
             /// performing clique covering
             if(disabling_slack_based_binding)
             {
@@ -2315,6 +2663,26 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
             unsigned int Tot_mux = 0;
 
+#ifdef RL_COLORING
+            // reconstruct cliques for the current partition from the coloring graph
+            
+
+            // get the partition vertices and cliques, and #cliques
+            Vector<> RL_module_clique = RL_module_clique_all_partitions[partition.first];
+
+            
+            // add vertex to clique
+
+        
+            // std::vector<CustomOrderedSet<vertex>> cliques;
+            
+            // for(const auto v : partition.second)
+            // {
+            //    const auto op_info = sdg->CGetOpNodeInfo(c2s[boost::get(boost::vertex_index, *CG, v)]);
+            //    const auto el1_name = op_info->vertex_name + "(" + op_info->GetOperation() + ")";
+            //    module_clique->add_vertex(c2s[boost::get(boost::vertex_index, *CG, v)], el1_name);
+            // }
+#endif
             /// retrieve the solution
             unsigned int delta_nclique = 0;
             for(unsigned int i = 0; i < module_clique->num_vertices(); ++i)
@@ -2326,8 +2694,10 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                }
 
 #if HAVE_UNORDERED
+               PRINT_DBG_MEX(4, 4, "Unordered clique set");
                const auto clique = clique_temp;
 #else
+               PRINT_DBG_MEX(4, 4, "Ordered clique set");
                OpVertexSet clique(sdg);
                clique.insert(clique_temp.begin(), clique_temp.end());
 #endif
@@ -2346,6 +2716,11 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                }
                total_resource_area += allocation_information->get_area(fu_unit);
                total_DSPs += allocation_information->get_DSPs(fu_unit);
+
+
+               PRINT_DBG_MEX(DEBUG_LEVEL_VERBOSE, debug_level,  "fu-unit:" + allocation_information->get_string_name(fu_unit) + 
+                              ", Resource usage:" + STR(allocation_information->get_area(fu_unit)));
+
 
                unsigned int total_muxes;
                unsigned int n_shared;
