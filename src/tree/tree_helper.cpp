@@ -2318,7 +2318,14 @@ tree_nodeConstRef tree_helper::CGetType(const tree_nodeConstRef& node)
       case gimple_return_K:
       {
          const auto gr = GetPointerS<const gimple_return>(node);
-         return CGetType(gr->op);
+         //return CGetType(gr->op);
+         // top level function return but there is no operand/return value, therefore no op associated with this node
+         if(gr->op){
+            return CGetType(gr->op);
+         } else {
+            return {};
+         }
+      
       }
       case gimple_for_K:
       case gimple_while_K:
