@@ -122,6 +122,29 @@ int getRandomNumber(int min, int max) {
     return distrib(gen);
 }
 
+std::string getFeature(std::string& line, std::string start_keyword, std::string end_keyword) {
+   std::string result;
+   size_t start_pos = line.find(start_keyword);
+   if (start_pos != std::string::npos) { // If the start keyword is found
+      // Move the position to the end of the start keyword
+      start_pos += start_keyword.length();
+
+      // Find the position of the end keyword
+      size_t end_pos = line.find(end_keyword, start_pos);
+      if (end_pos != std::string::npos) { // If the end keyword is found
+            // Extract the content between the start and end keywords
+            result = line.substr(start_pos, end_pos - start_pos);
+            std::cout << "Extracted content: " << result << std::endl;
+      } else {
+            std::cerr << "End keyword not found!" << std::endl;
+      }
+   } else {
+      std::cerr << "Start keyword not found!" << std::endl;
+   }
+
+   return result;
+}
+
 
 // Function to write the graph to a DOT file
 void write_graph_to_dot(const boost_cdfc_graph& graph, const std::string& filename) {
@@ -191,12 +214,12 @@ class cdfc_node_info_writer{
             const auto tree_node = TreeM->GetTreeNode(op_info->GetNodeId());
             if (tree_node) {
                //PRINT_DBG_MEX(4, 4, "kind=" + std::to_string(tree_node->get_kind()));
-               //out << "kind=" + std::to_string(op_info->node_type) << ",";
+               out << "node_type=" + STR(tree_node->get_kind()) << ",";
                const auto type_node = tree_helper::CGetType(tree_node);
                if(type_node){
                   auto bitwidth_op = tree_helper::TypeSize(tree_node);
                   out << "bitwidth=" + std::to_string(bitwidth_op) << ",";
-                  out << "typee=" + STR(type_node->get_kind()) << ",";
+                  out << "type=" + STR(type_node->get_kind()) << ",";
                } else {
                   out << "bitwidth=0" << ",";
                }
@@ -231,10 +254,10 @@ class cdfc_node_info_writer{
          // resource
          // for function unit
          out << "function_unit=" + STR(fu_unit) << ",";
-
+         out << "function_unit_name=" + alloc_info->get_string_name(fu_unit) << ",";
          // double resource_area += allocation_information->get_area(fu_unit);
          // double DSPs += allocation_information->get_DSPs(fu_unit);
-         // out << "resource_area=" + STR(alloc_info->get_area(fu_unit)) << ",";
+         out << "resource_area=" + STR(alloc_info->get_area(fu_unit)) << ",";
          // out << "DSP_usage=" + STR(alloc_info->get_DSPs(fu_unit)) << ",";
 
 
@@ -266,7 +289,6 @@ class cdfc_edge_info_writer{
       void operator()(std::ostream& out, const cdfc_edge& e) const
       {
          out << "[label=\"" << (*graph)[e].selector << "\",";
-         
          
          switch((*graph)[e].selector) {
             case cdfg_helper::CF_EDGE:
@@ -1519,8 +1541,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                // GET_NAME(sdg, tgt) << std::endl;
                if(!exists)
                {
-                  boost::tie(E, exists) =
-                      boost::add_edge(cdfc_src, cdfc_tgt, edge_cdfc_selector(CD_EDGE), *cdfc_bulk_graph);
+                  boost::tie(E, exists) = boost::add_edge(cdfc_src, cdfc_tgt, edge_cdfc_selector(CD_EDGE), *cdfc_bulk_graph);
                   THROW_ASSERT(exists, "already inserted edge");
                }
             }
@@ -1534,7 +1555,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
       // add the data flow edges from the dfg to the cdfg
       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
-                     "---add the control dependencies edges and the chained edges to the cdfg graph");
+                     "---add the data flow edges to the cdfg graph");
       for(boost::tie(ei, ei_end) = boost::edges(*dfg); ei != ei_end; ++ei)
       {
          vertex src = boost::source(*ei, *dfg);
@@ -1544,6 +1565,9 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
          cdfc_vertex cdfc_src = s2c[src];
          cdfc_vertex cdfc_tgt = s2c[tgt];
+
+
+
          if(cdfc_src != cdfc_tgt)
          {
             bool exists;
@@ -1574,21 +1598,22 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             if(df_edges.size() == 0)
             {
                boost::tie(E, exists) = boost::add_edge(cdfc_src, cdfc_tgt, edge_cdfc_selector(cdfg_helper::DF_EDGE), *cdfg_bulk_graph);
+               PRINT_DBG_MEX(4, 4, "Adding data flow edge " + STR(cdfc_src) + "-" + STR(cdfc_tgt) + " -- " + GET_NAME(dfg, src) + "-" + GET_NAME(dfg, tgt));
                THROW_ASSERT(exists, "already inserted edge");
             }
     
          }
          else
          {
-            THROW_ERROR(std::string(GET_NAME(dfg, src)) + "(" + dfg->CGetOpNodeInfo(src)->GetOperation() + ")--" +
-                        GET_NAME(dfg, tgt) + "(" + dfg->CGetOpNodeInfo(tgt)->GetOperation() + ")");
+            // the source and target vertices have been merged in the previous step, ignore
+            // THROW_ERROR(std::string(GET_NAME(dfg, src)) + "(" + dfg->CGetOpNodeInfo(src)->GetOperation() + ")--" +
+            //                GET_NAME(dfg, tgt) + "(" + dfg->CGetOpNodeInfo(tgt)->GetOperation() + ")");
          }
-      
       }
 
       // add the control flow edges from the cfg to the cdfg
       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
-                     "---add the control dependencies edges and the chained edges to the second cdfc graph");
+                     "---add the control flow edges to the second cdfc graph");
       for(boost::tie(ei, ei_end) = boost::edges(*cfg); ei != ei_end; ++ei)
       {
          vertex src = boost::source(*ei, *cfg);
@@ -1633,14 +1658,15 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             {
                
                boost::tie(E, exists) = boost::add_edge(cdfc_src, cdfc_tgt, edge_cdfc_selector(cdfg_helper::CF_EDGE), *cdfg_bulk_graph);
+               PRINT_DBG_MEX(4, 4, "Adding control flow edge " + STR(cdfc_src) + "-" + STR(cdfc_tgt) + " -- " + GET_NAME(cfg, src) + "-" + GET_NAME(cfg, tgt));
                THROW_ASSERT(exists, "already inserted edge");
             }
     
          }
          else
          {
-            THROW_ERROR(std::string(GET_NAME(cfg, src)) + "(" + cfg->CGetOpNodeInfo(src)->GetOperation() + ")--" +
-                        GET_NAME(cfg, tgt) + "(" + cfg->CGetOpNodeInfo(tgt)->GetOperation() + ")");
+            // THROW_ERROR(std::string(GET_NAME(cfg, src)) + "(" + cfg->CGetOpNodeInfo(src)->GetOperation() + ")--" +
+            //             GET_NAME(cfg, tgt) + "(" + cfg->CGetOpNodeInfo(tgt)->GetOperation() + ")");
          }
       
       }
@@ -2232,15 +2258,105 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
       }
 
 #ifdef RL_COLORING
+      /// call external coloring program
+      // int ret = std::system("python3 coloring.py");
+
+      // THROW_ASSERT(ret == 0, "Error in coloring");
+     
+
       /// Wait for RL coloring
+      // std::map<unsigned int, std::map<unsigned int, CustomOrderedSet<vertex>>> RL_module_clique_all_partitions;
+
+      // /// read the colored CG into cliques for each partitions
+      // // we need sdg
+
+      // std::ifstream RL_color_result_file("colored_CG.dot");
+      // THROW_ASSERT(RL_color_result_file.is_open(), "Could not open the file!");
+
+      // std::string line;
+
+      // OpVertexSet all_ops = sdg->CGetOperations();
+
+      // while (std::getline(RL_color_result_file, line))
+      // {
+      //    // get node ID, partition and color
+      //    std::string node_id = getFeature(line, "node_id", ",");
+      
 
 
-      /// read the colored CG into cliques for each partitions
+      //    std::string partition = getFeature(line, "partition", ",");
+
+
+      //    std::string node_color = getFeature(line, "color", ",");
+
+      //    auto it = all_ops.begin();
+
+      //    // loop through all sdg operation and look for node ID
+      //    for (;it != all_ops.end();)
+      //    {
+      //       const auto& op = *it;
+      //       const auto op_info = sdg->CGetOpNodeInfo(op);
+      //       if ((op_info->GetNodeId()) == std::stoi(node_id))
+      //       {
+
+      //          // get the partition
+      //          unsigned int partition_id = std::stoi(partition);
+
+
+      //          // get the color
+      //          unsigned int color = std::stoi(node_color);
+
+      //          // look for the clique map for this partition
+      //          if (RL_module_clique_all_partitions.find(partition_id) == RL_module_clique_all_partitions.end())
+      //          {
+      //             RL_module_clique_all_partitions[partition_id] = std::map<unsigned int, CustomOrderedSet<vertex>>();
+      //          }
+
+      //          // look for the clique
+      //          if (RL_module_clique_all_partitions[partition_id].find(color) == RL_module_clique_all_partitions[partition_id].end())
+      //          {
+      //             RL_module_clique_all_partitions[partition_id][color] = CustomOrderedSet<vertex>();
+      //          }
+
+      //          // add the vertex to the partition
+      //          RL_module_clique_all_partitions[partition_id][color].insert(op);
+
+      //          all_ops.erase(it);
+      //          break;
+      //       } else {
+      //          ++it;
+      //       }
+      //    }
+
+
+
+      //    THROW_ASSERT(it != all_ops.end(), "Could not find the node ID in the SDG");
+
+
+      // }
+
+
+
+    
+
+
+      // boost::dynamic_properties dp;
+      // boost::read_graphviz(dot_file, g, dp);
+
+
 
 
       // for(const auto& partition : partitions)
       // {
+      //    std::vector<CustomOrderedSet<vertex>> module_clique;
+      //    for(const auto v : partition.second)
+      //    {
+      //       // find the vertex from the CG file and get the color of it
+            
 
+      //    }
+
+      //    RL_module_clique_all_partitions[partition.first] = module_clique;
 
 
       // }
@@ -2668,8 +2784,12 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             
 
             // get the partition vertices and cliques, and #cliques
-            Vector<> RL_module_clique = RL_module_clique_all_partitions[partition.first];
-
+            // std::map<unsigned int, CustomOrderedSet<vertex>> RL_module_clique = RL_module_clique_all_partitions[partition.first];
+            // for(const auto& clique : RL_module_clique)
+            // {
+            //    const auto clique_temp = clique;
+            
+            // }
             
             // add vertex to clique
 
@@ -2682,6 +2802,8 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             //    const auto el1_name = op_info->vertex_name + "(" + op_info->GetOperation() + ")";
             //    module_clique->add_vertex(c2s[boost::get(boost::vertex_index, *CG, v)], el1_name);
             // }
+
+
 #endif
             /// retrieve the solution
             unsigned int delta_nclique = 0;

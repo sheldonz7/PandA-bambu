@@ -447,7 +447,7 @@ class cdfg_helper {
 
    }
 
-   static const int CF_EDGE = 3;
+   static const int CF_EDGE = 8;
    static const int DF_EDGE = 4;
    static const int CP_EDGE = 2;
 };
