@@ -96,6 +96,8 @@
 #include <utility>
 #include <vector>
 
+#include <chrono>
+#include <thread>
 #include <random>
 
 #ifdef HC_APPROACH
@@ -171,7 +173,6 @@ void write_graph_to_dot(const boost_cdfc_graph& graph, const std::string& filena
 }
 
 
-#ifdef RL_COLORING
 class cdfc_node_info_writer{
    private:
    // some helper data structures storing node related info
@@ -196,16 +197,18 @@ class cdfc_node_info_writer{
 
       // node features
       void operator()(std::ostream& out, const cdfc_vertex& v) const
-      {         
+      {  
          const auto op_info = sdg->CGetOpNodeInfo(c2s[v]);
          PRINT_DBG_MEX(4, 4, "Considering operation special " + op_info->GetOperation() + " " +
                          STR((op_info->GetNodeId())));
         
          
-         out << "[label=\"" << op_info->vertex_name + "(" + op_info->GetOperation() + ")\",";
+         out << "[label=" << op_info->vertex_name << ",";
          //out << "type=" + std::to_string(op_info->node_type) << ",";
+         out << "opcode=" << op_info->GetOperation() << ",";
          out << "node_id=" + STR(op_info->GetNodeId()) << ",";
-         
+         out << "vertex=" + STR(v) << ",";
+
          // bitwidth
       
          if(GET_TYPE(sdg, c2s[v]) & (TYPE_ENTRY | TYPE_EXIT)) {
@@ -257,7 +260,10 @@ class cdfc_node_info_writer{
          out << "function_unit_name=" + alloc_info->get_string_name(fu_unit) << ",";
          // double resource_area += allocation_information->get_area(fu_unit);
          // double DSPs += allocation_information->get_DSPs(fu_unit);
-         out << "resource_area=" + STR(alloc_info->get_area(fu_unit)) << ",";
+         
+         //out << "resource_area=" + STR(alloc_info->get_area(fu_unit)) << ",";
+         out << "resource_area=" + STR(round(alloc_info->get_area(fu_unit)));
+         //out << "resource_area_string=" + std::to_string(alloc_info->get_area(fu_unit)) << ",";
          // out << "DSP_usage=" + STR(alloc_info->get_DSPs(fu_unit)) << ",";
 
 
@@ -268,11 +274,11 @@ class cdfc_node_info_writer{
          // for interconnection and mux
          
          
-
+         // // binding/cluster info
+         // out << "color=-1";
+         
          out << "]";
       }
-
-
 };
 
 
@@ -288,7 +294,7 @@ class cdfc_edge_info_writer{
       }
       void operator()(std::ostream& out, const cdfc_edge& e) const
       {
-         out << "[label=\"" << (*graph)[e].selector << "\",";
+         out << "[edge_type=" << (*graph)[e].selector << ",";
          
          switch((*graph)[e].selector) {
             case cdfg_helper::CF_EDGE:
@@ -305,14 +311,10 @@ class cdfc_edge_info_writer{
                break;
          }
 
-
-
-         out << "\"]";
+         out << "]";
       }
 };
 
-
-#endif
 
 template <typename OutputIterator>
 struct topological_based_sorting_visitor : public boost::dfs_visitor<>
@@ -2249,119 +2251,146 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
       if(parameters->getOption<bool>(OPT_print_dot))
       {   
-         std::ofstream dot_file6("CG_cdfc_partitions_only.dot");
-         std::ofstream dot_file7("CG_cdfg_partitions_only.dot");
+         std::ofstream dot_file6(functionName + "_CG_cdfc_partitions_only.dot");
+         std::ofstream dot_file7(functionName + "_CG_cdfg_partitions_only.dot");
 
          //cdfc->WriteDot("HLS_CD_COMP.dot");
          boost::write_graphviz(dot_file6, *CG_cdfc_partitions_only, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
          boost::write_graphviz(dot_file7, *CG_cdfg_partitions_only, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfg_bulk_graph));
+
+         dot_file6.close();
+         dot_file7.close();
       }
 
+      //write the resource constraints to CG .dot file
+      std::ofstream rc_file(functionName + "_resource_constraints.csv");
+      rc_file << "function_unit,resource_name,library_name,resource_constraint\n";
+
+      //record resource constraints on a separate file
+      for(const auto& partition : partitions){
+         int fu = partition.first;
+         const auto res_name = allocation_information->get_fu_name(fu).first;
+         const auto lib_name = HLS->HLS_D->get_technology_manager()->get_library(res_name);
+         if(allocation_information->get_number_fu(partition.first) != INFINITE_UINT)
+         {
+            int num = allocation_information->get_number_fu(partition.first);  
+            rc_file << STR(fu) << "," << STR(res_name) << "," << STR(lib_name) << ","<< STR(num) << "\n";
+         }
+      }
+
+      rc_file.close();
+
+      PRINT_DBG_MEX(4,4,"top_function_name: " + parameters->getOption<std::string>(OPT_top_functions_names) + ",function name:" + functionName);
+
 #ifdef RL_COLORING
-      /// call external coloring program
-      // int ret = std::system("python3 coloring.py");
-
-      // THROW_ASSERT(ret == 0, "Error in coloring");
-     
-
-      /// Wait for RL coloring
-      // std::map<unsigned int, std::map<unsigned int, CustomOrderedSet<vertex>>> RL_module_clique_all_partitions;
-
-      // /// read the colored CG into cliques for each partitions
-      // // we need sdg
-
-      // std::ifstream RL_color_result_file("colored_CG.dot");
-      // THROW_ASSERT(RL_color_result_file.is_open(), "Could not open the file!");
-
-      // std::string line;
-
-      // OpVertexSet all_ops = sdg->CGetOperations();
-
-      // while (std::getline(RL_color_result_file, line))
-      // {
-      //    // get node ID, partition and color
-      //    std::string node_id = getFeature(line, "node_id", ",");
+      std::map<unsigned int, std::map<unsigned int, CustomOrderedSet<vertex>>> RL_module_clique_all_partitions;
+      if (parameters->getOption<std::string>(OPT_top_functions_names) == functionName)
+      {
+         
       
+         // call external RL coloring program and get the colored CSV, no need to wait the CSV since it will readily available in the running dir once coloring program return
+         
+
+         // for dataset generation, call external brute-force coloring program to find all solutions
+         // the program will generate a csv for every solution, and give out one solution for Bambu to use
+
+         // check for given coloring solution
+         
+      
+         // if(!RL_color_result_file.is_open())
+         // {
+         //    // given coloring solution not found, call the brute-force coloring program
+         //    int ret = std::system("python3 coloring.py");
+         //    THROW_ASSERT(ret == 0, "Error in coloring");
+
+         //    // reopen the coloring solution file
+         //    RL_color_result_file.open("coloring_result.csv");
+         //    THROW_ASSERT(RL_color_result_file.is_open(), "Error in opening coloring result file");
+         // }
+         PRINT_DBG_MEX(4,4,"Waiting for external coloring solution");
+         while (std::filesystem::exists("coloring_result.csv") == false)
+         {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+         }
+         std::ifstream RL_color_result_file("coloring_result.csv");
+         PRINT_DBG_MEX(4,4,"Using external coloring solution, skipped coloring process");
 
 
-      //    std::string partition = getFeature(line, "partition", ",");
+         std::string line;
 
+         OpVertexSet all_ops = sdg->CGetOperations();
 
-      //    std::string node_color = getFeature(line, "color", ",");
+         // read off the header
+         std::getline(RL_color_result_file, line);
 
-      //    auto it = all_ops.begin();
+         while (std::getline(RL_color_result_file, line))
+         {
+            std::stringstream ss(line);
+            std::string item;
+            int vertex_index,partition_id,color;
+            std::vector<std::string> row;
 
-      //    // loop through all sdg operation and look for node ID
-      //    for (;it != all_ops.end();)
-      //    {
-      //       const auto& op = *it;
-      //       const auto op_info = sdg->CGetOpNodeInfo(op);
-      //       if ((op_info->GetNodeId()) == std::stoi(node_id))
-      //       {
-
-      //          // get the partition
-      //          unsigned int partition_id = std::stoi(partition);
-
-
-      //          // get the color
-      //          unsigned int color = std::stoi(node_color);
-
-      //          // look for the clique map for this partition
-      //          if (RL_module_clique_all_partitions.find(partition_id) == RL_module_clique_all_partitions.end())
-      //          {
-      //             RL_module_clique_all_partitions[partition_id] = std::map<unsigned int, CustomOrderedSet<vertex>>();
-      //          }
-
-      //          // look for the clique
-      //          if (RL_module_clique_all_partitions[partition_id].find(color) == RL_module_clique_all_partitions[partition_id].end())
-      //          {
-      //             RL_module_clique_all_partitions[partition_id][color] = CustomOrderedSet<vertex>();
-      //          }
-
-      //          // add the vertex to the partition
-      //          RL_module_clique_all_partitions[partition_id][color].insert(op);
-
-      //          all_ops.erase(it);
-      //          break;
-      //       } else {
-      //          ++it;
-      //       }
-      //    }
-
-
-
-      //    THROW_ASSERT(it != all_ops.end(), "Could not find the node ID in the SDG");
-
-
-      // }
-
-
-
-    
-
-
-      // boost::dynamic_properties dp;
-      // boost::read_graphviz(dot_file, g, dp);
-
-
-
-
-      // for(const auto& partition : partitions)
-      // {
-      //    std::vector<CustomOrderedSet<vertex>> module_clique;
-      //    for(const auto v : partition.second)
-      //    {
-      //       // find the vertex from the CG file and get the color of it
+            // get node ID, partition and color
+            int i = 0;
+            while (std::getline(ss, item, ','))
+            {
+               switch(i)
+               {
+                  case 0:
+                     vertex_index=stoi(item);
+                     break;
+                  case 1:
+                     partition_id=stoi(item);
+                     break;
+                  case 2:
+                     color=stoi(item);
+                     break;
+                  default:
+                     THROW_ERROR("unexpected condition");
+               }
+               i++;
+            }
+            // std::string node_id = getFeature(line, "node_id", ",");
+            // std::string partition = getFeature(line, "partition", ",");
+            // std::string node_color = getFeature(line, "color", ",");
             
+            PRINT_DBG_MEX(4,4, "vertex_index: " + STR(vertex_index) + " partition_id: " + STR(partition_id) + " color: " + STR(color));
 
-      //    }
+            // look for the clique map for this partition
+            if (RL_module_clique_all_partitions.find(partition_id) == RL_module_clique_all_partitions.end())
+            {
+               RL_module_clique_all_partitions[partition_id] = std::map<unsigned int, CustomOrderedSet<vertex>>();
+            }
 
-      //    RL_module_clique_all_partitions[partition.first] = module_clique;
+            // look for the clique
+            if (RL_module_clique_all_partitions[partition_id].find(color) == RL_module_clique_all_partitions[partition_id].end())
+            {
+               RL_module_clique_all_partitions[partition_id][color] = CustomOrderedSet<vertex>();
+            }
+
+            // add the vertex to the partition
+            RL_module_clique_all_partitions[partition_id][color].insert(c2s[vertex_index]);
 
 
-      // }
+         }
+
+         // print RL_module_clique_all_partitions
+         for(const auto& partition : RL_module_clique_all_partitions)
+         {
+            PRINT_DBG_MEX(4,4, "Partition: " + STR(partition.first));
+            for(const auto& color : partition.second)
+            {
+               PRINT_DBG_MEX(4,4, " Color: " + STR(color.first));
+               for(const auto v : color.second)
+               {
+                  const auto op_info = sdg->CGetOpNodeInfo(v);
+                  PRINT_DBG_MEX(4,4, "Operation/Vertice: " + op_info->vertex_name + "(" + op_info->GetOperation() + ")");
+               }
+            }
+         }
 
 
+      }
 
 
 #else
@@ -2374,7 +2403,8 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 #ifdef RL_COLORING
       const unsigned int number_of_iterations = 1;
 #else
-      const unsigned int number_of_iterations = n_vert > OP_THRESHOLD ? 2 : 10;
+      // const unsigned int number_of_iterations = n_vert > OP_THRESHOLD ? 2 : 10;
+      const unsigned int number_of_iterations = 1;
 #endif
       const std::map<unsigned int, unsigned int> numModule_initial = numModule;
       const size_t total_modules_allocated_initial = total_modules_allocated;
@@ -2513,6 +2543,9 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                const auto op_info = sdg->CGetOpNodeInfo(c2s[boost::get(boost::vertex_index, *CG, v)]);
                const auto el1_name = op_info->vertex_name + "(" + op_info->GetOperation() + ")";
                module_clique->add_vertex(c2s[boost::get(boost::vertex_index, *CG, v)], el1_name);
+               PRINT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
+                           "cdfc vertex raw" + STR(v) +
+                               " cdfc vertex" + STR(boost::get(boost::vertex_index, *CG, v)));
             }
 
             if(clique_covering_method == CliqueCovering_Algorithm::BIPARTITE_MATCHING)
@@ -2779,37 +2812,75 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
             unsigned int Tot_mux = 0;
 
+
+
+            // retrieve the solution
+            unsigned int delta_nclique = 0;
+            std::map<unsigned int, CustomOrderedSet<vertex>> module_clique_temp;
+
+
 #ifdef RL_COLORING
             // reconstruct cliques for the current partition from the coloring graph
-            
+            //get the partition vertices and cliques, and #cliques
+            if (parameters->getOption<std::string>(OPT_top_functions_names) == functionName)
+            {
+               // get module clique from RL coloring
+               module_clique_temp = RL_module_clique_all_partitions[partition.first];
+               PRINT_DBG_MEX(4,4,"RL clique temp:");
+               for(const auto color_clique_pair : module_clique_temp)
+               {
+                  const auto clique_temp = color_clique_pair.second;
+                  PRINT_DBG_MEX(4,4, "clique" + STR(color_clique_pair.first));
+                  // print clique_temp
+                  for(const auto v : clique_temp)
+                  {
+                     const auto op_info = sdg->CGetOpNodeInfo(v);
+                     PRINT_DBG_MEX(4,4, "Operation/Vertice: " + op_info->vertex_name + "(" + op_info->GetOperation() + ")");
+                  }
+               }
+               // add vertex to clique
 
-            // get the partition vertices and cliques, and #cliques
-            // std::map<unsigned int, CustomOrderedSet<vertex>> RL_module_clique = RL_module_clique_all_partitions[partition.first];
-            // for(const auto& clique : RL_module_clique)
-            // {
-            //    const auto clique_temp = clique;
-            
-            // }
-            
-            // add vertex to clique
+         
+               // std::vector<CustomOrderedSet<vertex>> cliques;
+               
+               // for(const auto v : partition.second)
+               // {
+               //    const auto op_info = sdg->CGetOpNodeInfo(c2s[boost::get(boost::vertex_index, *CG, v)]);
+               //    const auto el1_name = op_info->vertex_name + "(" + op_info->GetOperation() + ")";
+               //    module_clique->add_vertex(c2s[boost::get(boost::vertex_index, *CG, v)], el1_name);
+               // }
+               PRINT_DBG_MEX(4,4,"original clique temp:");
+               for(unsigned int i = 0; i < module_clique->num_vertices(); ++i)
+               {
+                  const auto clique_temp = module_clique->get_clique(i);
+                  PRINT_DBG_MEX(4,4, "clique" + STR(i));
+                  // print clique temp
+                  for(const auto v : clique_temp)
+                  {
+                     const auto op_info = sdg->CGetOpNodeInfo(v);
+                     PRINT_DBG_MEX(4,4, "Operation/Vertice: " + op_info->vertex_name + "(" + op_info->GetOperation() + ")");
+                  }
+               }
 
-        
-            // std::vector<CustomOrderedSet<vertex>> cliques;
             
-            // for(const auto v : partition.second)
-            // {
-            //    const auto op_info = sdg->CGetOpNodeInfo(c2s[boost::get(boost::vertex_index, *CG, v)]);
-            //    const auto el1_name = op_info->vertex_name + "(" + op_info->GetOperation() + ")";
-            //    module_clique->add_vertex(c2s[boost::get(boost::vertex_index, *CG, v)], el1_name);
-            // }
-
-
-#endif
-            /// retrieve the solution
-            unsigned int delta_nclique = 0;
+            
+            } else {
+               for(unsigned int i = 0; i < module_clique->num_vertices(); ++i)
+               {
+                  module_clique_temp[i] = module_clique->get_clique(i);
+               }
+            }
+#else
             for(unsigned int i = 0; i < module_clique->num_vertices(); ++i)
             {
-               const auto clique_temp = module_clique->get_clique(i);
+               module_clique_temp[i] = module_clique->get_clique(i);
+            }
+
+#endif
+            for(const auto color_clique_pair : module_clique_temp)
+            {
+               const auto clique_temp = color_clique_pair.second;
+
                if(clique_temp.empty())
                {
                   continue;
