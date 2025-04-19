@@ -204,10 +204,12 @@ class cdfc_node_info_writer{
         
          
          out << "[label=" << op_info->vertex_name << ",";
-         //out << "type=" + std::to_string(op_info->node_type) << ",";
+         out << "node_type=" + std::to_string(op_info->node_type) << ",";
          out << "opcode=" << op_info->GetOperation() << ",";
          out << "node_id=" + STR(op_info->GetNodeId()) << ",";
          out << "vertex=" + STR(v) << ",";
+    
+
 
          // bitwidth
       
@@ -216,8 +218,8 @@ class cdfc_node_info_writer{
          } else {
             const auto tree_node = TreeM->GetTreeNode(op_info->GetNodeId());
             if (tree_node) {
-               //PRINT_DBG_MEX(4, 4, "kind=" + std::to_string(tree_node->get_kind()));
-               out << "node_type=" + STR(tree_node->get_kind()) << ",";
+               PRINT_DBG_MEX(4, 4, "kind=" + std::to_string(tree_node->get_kind()));
+               out << "node_kind=" + STR(tree_node->get_kind()) << ",";
                const auto type_node = tree_helper::CGetType(tree_node);
                if(type_node){
                   auto bitwidth_op = tree_helper::TypeSize(tree_node);
@@ -260,11 +262,11 @@ class cdfc_node_info_writer{
          out << "function_unit_name=" + alloc_info->get_string_name(fu_unit) << ",";
          // double resource_area += allocation_information->get_area(fu_unit);
          // double DSPs += allocation_information->get_DSPs(fu_unit);
-         
+         out << "num_channels=" + STR(alloc_info->get_number_channels(fu_unit)) << ",";   
          //out << "resource_area=" + STR(alloc_info->get_area(fu_unit)) << ",";
-         out << "resource_area=" + STR(round(alloc_info->get_area(fu_unit)));
+         out << "resource_area=" + STR(round(alloc_info->get_area(fu_unit))) << ",";
          //out << "resource_area_string=" + std::to_string(alloc_info->get_area(fu_unit)) << ",";
-         // out << "DSP_usage=" + STR(alloc_info->get_DSPs(fu_unit)) << ",";
+         out << "DSP_usage=" + STR(alloc_info->get_DSPs(fu_unit));
 
 
 
@@ -1283,7 +1285,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
       initialize_connection_relation(con_rel, all_candidate_vertices);
       boost_cdfc_graphRef cdfc_bulk_graph = boost_cdfc_graphRef(new boost_cdfc_graph());
       boost_cdfc_graphRef cdfg_bulk_graph = boost_cdfc_graphRef(new boost_cdfc_graph());
-
+      boost_cdfc_graphRef dfg_bulk_graph = boost_cdfc_graphRef(new boost_cdfc_graph());
 
       if(output_level >= OUTPUT_LEVEL_MINIMUM)
       {
@@ -1500,16 +1502,19 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
       for(boost::tie(cvi, cvi_end) = boost::vertices(*cdfc_bulk_graph); cvi != cvi_end; ++cvi)
       {
          boost::add_vertex(*cdfg_bulk_graph);
+         boost::add_vertex(*dfg_bulk_graph);
       }
 
       if(parameters->getOption<bool>(OPT_print_dot))
       {
          std::ofstream dot_file1(functionName + "_cdfc_bulk_graph_vertex_only.dot");
          std::ofstream dot_file2(functionName + "_cdfg_bulk_graph_vertex_only.dot");
+         std::ofstream dot_file3(functionName + "_dfg_bulk_graph_vertex_only.dot");
 
          //cdfc->WriteDot("HLS_CD_COMP.dot");
          boost::write_graphviz(dot_file1, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu));
          boost::write_graphviz(dot_file2, *cdfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu));
+         boost::write_graphviz(dot_file3, *dfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu));
       }
 
 
@@ -1600,6 +1605,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             if(df_edges.size() == 0)
             {
                boost::tie(E, exists) = boost::add_edge(cdfc_src, cdfc_tgt, edge_cdfc_selector(cdfg_helper::DF_EDGE), *cdfg_bulk_graph);
+               boost::tie(E, exists) = boost::add_edge(cdfc_src, cdfc_tgt, edge_cdfc_selector(cdfg_helper::DF_EDGE), *dfg_bulk_graph);
                PRINT_DBG_MEX(4, 4, "Adding data flow edge " + STR(cdfc_src) + "-" + STR(cdfc_tgt) + " -- " + GET_NAME(dfg, src) + "-" + GET_NAME(dfg, tgt));
                THROW_ASSERT(exists, "already inserted edge");
             }
@@ -1679,8 +1685,10 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
       std::ofstream dot_file_cdfc(functionName + "_cdfc_bulk_graph_pre_compatibility.dot");
       std::ofstream dot_file_cdfg(functionName + "_cdfg_bulk_graph_pre_compatibility.dot");
+      std::ofstream dot_file_dfg(functionName + "_dfg_bulk_graph_pre_compatibility.dot");
       boost::write_graphviz(dot_file_cdfc, *cdfc_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
-      boost::write_graphviz(dot_file_cdfc, *cdfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfg_bulk_graph));
+      boost::write_graphviz(dot_file_cdfg, *cdfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfg_bulk_graph));
+      boost::write_graphviz(dot_file_dfg, *dfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(dfg_bulk_graph));
 
 #ifdef HC_APPROACH
       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
@@ -1950,6 +1958,8 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                   if(cp_edges.size() == 0)
                   {
                      boost::tie(E, exists) = boost::add_edge(s2c[*cv1_it], s2c[*cv2_it], edge_cdfc_selector(COMPATIBILITY_EDGE, _w), *cdfg_bulk_graph);
+                     boost::tie(E, exists) = boost::add_edge(s2c[*cv1_it], s2c[*cv2_it], edge_cdfc_selector(COMPATIBILITY_EDGE, _w), *dfg_bulk_graph);
+                     
                      THROW_ASSERT(exists, "already inserted edge");
                   }
                   else
@@ -1961,6 +1971,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                   if(cp_edges.size() == 0)
                   {
                      boost::tie(E, exists) = boost::add_edge(s2c[*cv2_it], s2c[*cv1_it], edge_cdfc_selector(COMPATIBILITY_EDGE, _w), *cdfg_bulk_graph);
+                     boost::tie(E, exists) = boost::add_edge(s2c[*cv2_it], s2c[*cv1_it], edge_cdfc_selector(COMPATIBILITY_EDGE, _w), *dfg_bulk_graph);
                      THROW_ASSERT(exists, "already inserted edge");
                   }
                   else
@@ -2179,6 +2190,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
       {
          std::ofstream dot_file1(functionName + "_cdfc_bulk_graph.dot");
          std::ofstream dot_file5(functionName + "_cdfg_bulk_graph.dot");
+         std::ofstream dot_file6(functionName + "_dfg_bulk_graph.dot");
          std::ofstream dot_file2(functionName + "_cdfc.dot");
          std::ofstream dot_file3(functionName + "_CG.dot");
          std::ofstream dot_file4(functionName + "_CD_chained_graph.dot");
@@ -2189,6 +2201,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
          boost::write_graphviz(dot_file3, *CG, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
          boost::write_graphviz(dot_file4, *CD_chained_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfc_bulk_graph));
          boost::write_graphviz(dot_file5, *cdfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(cdfg_bulk_graph));
+         boost::write_graphviz(dot_file6, *dfg_bulk_graph, cdfc_node_info_writer(sdg, c2s, HLSMgr->get_tree_manager(), allocation_information, fu), cdfc_edge_info_writer(dfg_bulk_graph));
       }
 
       CustomUnorderedMap<vertex, vertex> identity_converter;
@@ -2281,6 +2294,8 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
       rc_file.close();
 
       PRINT_DBG_MEX(4,4,"top_function_name: " + parameters->getOption<std::string>(OPT_top_functions_names) + ",function name:" + functionName);
+
+      
 
 #ifdef RL_COLORING
       std::map<unsigned int, std::map<unsigned int, CustomOrderedSet<vertex>>> RL_module_clique_all_partitions;
@@ -2395,6 +2410,13 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
 
 #else
 
+
+   // file containing Bambu solution
+      std::ofstream coloring_result_file(functionName + "_coloring_result.csv");
+      coloring_result_file << "vertex_index,function_unit,color\n";
+
+
+
 #endif
 
       /// solve the binding problem for all the partitions
@@ -2402,10 +2424,9 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
       
 #ifdef RL_COLORING
       const unsigned int number_of_iterations = 1;
-#else
-      // const unsigned int number_of_iterations = n_vert > OP_THRESHOLD ? 2 : 10;
-      const unsigned int number_of_iterations = 1;
-#endif
+#else    
+      const unsigned int number_of_iterations = n_vert > OP_THRESHOLD ? 2 : 10;
+#endif 
       const std::map<unsigned int, unsigned int> numModule_initial = numModule;
       const size_t total_modules_allocated_initial = total_modules_allocated;
       const double total_resource_area_initial = total_resource_area;
@@ -2484,6 +2505,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             START_TIME(clique_iteration_cputime);
          }
 
+         int total_color = 1;
 
          for(const auto& partition : partitions)
          {
@@ -2853,6 +2875,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                for(unsigned int i = 0; i < module_clique->num_vertices(); ++i)
                {
                   const auto clique_temp = module_clique->get_clique(i);
+                  
                   PRINT_DBG_MEX(4,4, "clique" + STR(i));
                   // print clique temp
                   for(const auto v : clique_temp)
@@ -2875,8 +2898,35 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
             {
                module_clique_temp[i] = module_clique->get_clique(i);
             }
+            
+            // export Bambu coloring result only in the first iteration
+            if (iteration == 0) {
+               INDENT_DBG_MEX(4,4,"Saving Bambu coloring result:");
+               for(unsigned int i = 0; i < module_clique->num_vertices(); ++i)
+               {
+                  const auto clique_temp = module_clique->get_clique(i);
+                  
+                  INDENT_DBG_MEX(4,4, "clique" + STR(i));
+                  // print clique temp
+                  for(const auto v : clique_temp)
+                  {
+                     
+                     const auto op_info = sdg->CGetOpNodeInfo(v);
+                     INDENT_DBG_MEX(4,4, "Vertex: " + STR(s2c[v]) + "(" + op_info->GetOperation() + ")" + "assigned with color: " + STR(i + total_color));
+                     
+                     unsigned int fu_unit = fu->get_assign(v);
 
+                     // std::string fu_name = alloc_info->get_string_name(fu_unit) << ",";
+                     
+                     coloring_result_file << STR(s2c[v]) << "," << STR(fu_unit) << ","<< STR(i + total_color) << "\n";
+                  }
+               }
+
+
+               total_color += module_clique->num_vertices();
+            }
 #endif
+
             for(const auto color_clique_pair : module_clique_temp)
             {
                const auto clique_temp = color_clique_pair.second;
@@ -2954,7 +3004,7 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                                          mux_time_estimation) < 0 ||
                                         first_vertex_has_negative_slack) &&
                                        clique.size() > 1))
-                  {
+                  {           
                      INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level,
                                     " negative slack: solution is not feasible");
                      fu->bind(current_vert, fu_unit, numModule[fu_unit]);
@@ -2995,31 +3045,34 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
                   starting_time[current_vert] = max_starting_time;
                   to_update.insert(current_vert);
                   update_slack_starting_time(fdfg, to_update, slack_time, starting_time, false, true, false);
-                  /*
-                                    INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "-->Updated Starting time ***
-                  Latest ending time *** Slacks"); #ifndef NDEBUG for(const auto operation : sdg->CGetOperations())
-                                    {
-                                       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "---" + GET_NAME(sdg,
-                  operation) + " *** starting_time=" + STR(starting_time.find(operation)->second) + " ***
-                  latest_ending_time=" + STR(ending_time.find(operation)->second) + " *** slack_time="+
-                  STR(slack_time.find(operation)->second));
-                                    }
-                  #endif
-                                    INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "<--");
-                  */
+                  
+//                   INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "-->Updated Starting time ***Latest ending time *** Slacks");
+// #ifndef NDEBUG
+//                   for(const auto operation : sdg->CGetOperations())
+//                   {
+//                      INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "---" + GET_NAME(sdg, operation) + 
+//                      " *** starting_time=" + STR(starting_time.find(operation)->second) + 
+//                      " ***latest_ending_time=" + STR(ending_time.find(operation)->second) +
+//                      " *** slack_time=" + STR(slack_time.find(operation)->second));
+//                   }
+// #endif
+//                   INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "<--");
+                  
                   to_update.insert(current_vert);
                   update_slack_starting_time(fdfg, to_update, slack_time, starting_time, true, false, true);
-                  /*                  INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "-->Updated Starting time
-                  *** Latest ending time *** Slacks"); #ifndef NDEBUG for(const auto operation : sdg->CGetOperations())
-                                    {
-                                       INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "---" + GET_NAME(sdg,
-                  operation) + " *** starting_time=" + STR(starting_time.find(operation)->second) + " ***
-                  latest_ending_time=" + STR(ending_time.find(operation)->second) + " *** slack_time="+
-                  STR(slack_time.find(operation)->second));
-                                    }
-                  #endif
-                                    INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "<--");
-                  */
+                  
+//                   INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "-->Updated Starting time ***Latest ending time *** Slacks");
+// #ifndef NDEBUG
+//                   for(const auto operation : sdg->CGetOperations())
+//                   {
+//                      INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "---" + GET_NAME(sdg, operation) +
+//                      " *** starting_time=" + STR(starting_time.find(operation)->second) +
+//                      " *** latest_ending_time=" + STR(ending_time.find(operation)->second) +
+//                      " *** slack_time=" + STR(slack_time.find(operation)->second));
+//                   }
+// #endif
+//                   INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "<--");
+                  
                }
                INDENT_DBG_MEX(DEBUG_LEVEL_VERY_PEDANTIC, debug_level, "<--Analyzed clique");
             }
@@ -3064,6 +3117,9 @@ DesignFlowStep_Status cdfc_module_binding::InternalExec()
          INDENT_OUT_MEX(OUTPUT_LEVEL_MINIMUM, output_level,
                         "---Clique covering computation completed in " + print_cpu_time(clique_cputime) + " seconds");
       }
+#ifndef RL_COLORING
+      coloring_result_file.close();
+#endif
    }
 
    if(output_level <= OUTPUT_LEVEL_PEDANTIC)
